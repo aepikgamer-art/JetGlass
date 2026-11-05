@@ -224,12 +224,46 @@ final class FR24LiveService {
     // MARK: - Route lookup (adsbdb)
 
     func route(callsign: String) async -> ADSBRoute? {
+        await Self.fetchRoute(callsign: callsign, session: session)
+    }
+
+    static func fetchRoute(callsign: String, session: URLSession) async -> ADSBRoute? {
         let cs = callsign.trimmingCharacters(in: .whitespaces).uppercased()
         guard cs.count >= 3,
               let url = URL(string: "https://api.adsbdb.com/v0/callsign/" + cs) else { return nil }
         guard let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
         return (try? JSONDecoder().decode(ADSBDBRouteResponse.self, from: data))?.response?.flightroute
+    }
+
+    func airportTraffic(icao: String, latitude: Double, longitude: Double) async -> (arrivals: [AirportFlight], departures: [AirportFlight]) {
+        let center = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        let region = MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 0.6, longitudeDelta: 0.6))
+        let planes = (try? await fetchADSBLoL(center: center, region: region)) ?? []
+        let candidates = planes.filter { ($0.flight?.isEmpty == false) }.prefix(30)
+        let session = self.session
+        var arrivals: [AirportFlight] = []
+        var departures: [AirportFlight] = []
+        await withTaskGroup(of: (LiveAircraft, ADSBRoute?).self) { group in
+            for plane in candidates {
+                let callsign = plane.flight ?? ""
+                group.addTask {
+                    (plane, await Self.fetchRoute(callsign: callsign, session: session))
+                }
+            }
+            for await (plane, route) in group {
+                guard let route else { continue }
+                if route.destination.icaoCode.uppercased() == icao.uppercased() {
+                    arrivals.append(AirportFlight(plane: plane, route: route))
+                }
+                if route.origin.icaoCode.uppercased() == icao.uppercased() {
+                    departures.append(AirportFlight(plane: plane, route: route))
+                }
+            }
+        }
+        arrivals.sort { $0.plane.altitudeFeet < $1.plane.altitudeFeet }
+        departures.sort { $0.plane.altitudeFeet < $1.plane.altitudeFeet }
+        return (arrivals, departures)
     }
 }
 
@@ -261,4 +295,10 @@ struct ADSBRoute: Codable {
 struct ADSBDBRouteResponse: Codable {
     struct Inner: Codable { let flightroute: ADSBRoute? }
     let response: Inner?
+}
+
+struct AirportFlight: Identifiable {
+    let plane: LiveAircraft
+    let route: ADSBRoute
+    var id: String { plane.id }
 }

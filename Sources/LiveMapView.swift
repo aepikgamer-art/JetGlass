@@ -353,6 +353,11 @@ struct LiveMapView: View {
     @State private var results: [Airport] = []
     @State private var showAirlineLabels: Bool = true
     @State private var showFilters = false
+    @State private var airportSheet: Airport?
+    @State private var arrFlights: [AirportFlight] = []
+    @State private var depFlights: [AirportFlight] = []
+    @State private var arrDepLoading = false
+    @State private var arrDepMode = 0
 
     @State private var cardPlane: LiveAircraft?
     @State private var cardData: JetAPIResponse?
@@ -389,6 +394,9 @@ struct LiveMapView: View {
         .sheet(isPresented: $showFilters) {
             filtersSheet
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $airportSheet) { airport in
+            airportSheetView(airport)
         }
         .onAppear {
             showAirlineLabels = settings.showAirlineLabels
@@ -505,12 +513,12 @@ struct LiveMapView: View {
                 if let route = cardRoute {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            Text(route.origin.iataCode.isEmpty ? route.origin.icaoCode : route.origin.iataCode)
+                            Text(route.origin.icaoCode)
                                 .bold()
                             Image(systemName: "arrow.right")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            Text(route.destination.iataCode.isEmpty ? route.destination.icaoCode : route.destination.iataCode)
+                            Text(route.destination.icaoCode)
                                 .bold()
                             Spacer()
                             Text("live route")
@@ -713,7 +721,7 @@ struct LiveMapView: View {
                     .font(.headline)
                     .lineLimit(1)
                 if let route = cardRoute {
-                    Text("\(route.origin.iataCode.isEmpty ? route.origin.icaoCode : route.origin.iataCode) → \(route.destination.iataCode.isEmpty ? route.destination.icaoCode : route.destination.iataCode) · \(route.origin.icaoCode) → \(route.destination.icaoCode)")
+                    Text("\(route.origin.icaoCode) → \(route.destination.icaoCode)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -817,7 +825,7 @@ struct LiveMapView: View {
             if !results.isEmpty {
                 VStack(spacing: 4) {
                     ForEach(results.prefix(6)) { airport in
-                        Button { goTo(airport) } label: {
+                        Button { openAirportSheet(airport) } label: {
                             HStack {
                                 Text(airport.icao).bold()
                                 Text("· \(airport.iata)")
@@ -964,9 +972,120 @@ struct LiveMapView: View {
         .buttonStyle(.plain)
     }
 
+    private func openAirportSheet(_ airport: Airport) {
+        results = []
+        airportSheet = airport
+    }
+
+    private func loadAirportTraffic(_ airport: Airport) {
+        arrFlights = []
+        depFlights = []
+        arrDepLoading = true
+        Task {
+            let traffic = await FR24LiveService().airportTraffic(
+                icao: airport.icao, latitude: airport.latitude, longitude: airport.longitude)
+            guard airportSheet?.icao == airport.icao else { return }
+            arrFlights = traffic.arrivals
+            depFlights = traffic.departures
+            arrDepLoading = false
+        }
+    }
+
+    private func airportSheetView(_ airport: Airport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(airport.icao)
+                        .font(.title3.bold())
+                    Text("' + I + 'airport.name) · ' + I + 'airport.city), ' + I + 'airport.country)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button {
+                    airportSheet = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Picker("Traffic", selection: $arrDepMode) {
+                Text("Arrivals").tag(0)
+                Text("Departures").tag(1)
+            }
+            .pickerStyle(.segmented)
+
+            if arrDepLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 24)
+            } else {
+                let flights = arrDepMode == 0 ? arrFlights : depFlights
+                if flights.isEmpty {
+                    Text(arrDepMode == 0
+                         ? "No arrivals tracked near ' + I + 'airport.icao) right now."
+                         : "No departures tracked near ' + I + 'airport.icao) right now.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 24)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(flights) { flight in
+                                flightRow(flight, isArrival: arrDepMode == 0)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button {
+                airportSheet = nil
+                goTo(airport)
+            } label: {
+                Label("Move to it", systemImage: "location.magnifyingglass")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+        }
+        .padding()
+        .presentationDetents([.medium, .large])
+        .task(id: airport.icao) {
+            loadAirportTraffic(airport)
+        }
+    }
+
+    private func flightRow(_ item: AirportFlight, isArrival: Bool) -> some View {
+        HStack {
+            Image(systemName: isArrival ? "arrow.down.circle" : "arrow.up.circle")
+                .foregroundStyle(isArrival ? .cyan : .orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.plane.flight ?? item.plane.registration ?? item.plane.modeS.uppercased())
+                    .font(.subheadline.bold())
+                Text(isArrival ? "from ' + I + 'item.route.origin.icaoCode)" : "to ' + I + 'item.route.destination.icaoCode)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(item.plane.altitudeDisplay)
+                Text("' + I + 'item.plane.speedKnots) kt")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+    }
+
     private func goToFirstResult() {
         if let airport = results.first ?? AirportsService.shared.airport(forICAO: search) {
-            goTo(airport)
+            openAirportSheet(airport)
         }
     }
 
