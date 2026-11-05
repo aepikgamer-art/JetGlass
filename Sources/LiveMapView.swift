@@ -321,6 +321,7 @@ struct LiveMapView: View {
         .toolbar(.hidden, for: .navigationBar) // no top title bar
         .onAppear {
             showAirlineLabels = settings.showAirlineLabels
+
             model.showAirlineLabels = settings.showAirlineLabels
             model.onSelectAircraft = { plane in
                 showCard(for: plane)
@@ -376,6 +377,7 @@ struct LiveMapView: View {
             if let data = try? await client.lookup(query: query, photos: 4, flights: 5) {
                 guard cardPlane?.id == plane.id else { return }
                 cardData = data
+
                 if let frType = data.flightRadar?.aircraft, !frType.isEmpty, cardType == nil {
                     cardType = frType
                 }
@@ -531,6 +533,7 @@ struct LiveMapView: View {
     }
 
     private var closeButton: some View {
+
         Button {
             withAnimation { cardPlane = nil }
         } label: {
@@ -643,7 +646,8 @@ struct LiveMapView: View {
             }
 
             Text("\(model.aircraft.count) aircraft")
-                .font(.caption.monospacedDigit())
+    
+            .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .glassCard()
@@ -660,9 +664,8 @@ struct LiveMapView: View {
     }
 
     private func goToFirstResult() {
-          if let airport = results.first ?? AirportsService.shared.airport(forICAO: search) {
+        if let airport = results.first ?? AirportsService.shared.airport(forICAO: search) {
             goTo(airport)
-            }
         }
     }
 
