@@ -4,8 +4,10 @@ struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var cacheCleared = false
 
-    private let altStoreDirect = URL(string:
-        "altstore://install?url=https%3A%2F%2Fnightly.link%2Faepikgamer-art%2FJetGlass%2Fworkflows%2FBuild%2520IPA%2Fmain%2FJetGlass-ipa.zip")!
+    private let altDirect = URL(string:
+        "https://altdirect.app/?url=https%3A%2F%2Fraw.githubusercontent.com%2Faepikgamer-art%2FJetGlass%2Fmain%2Faltstore-source.json")!
+    private let ipaDownload = URL(string:
+        "https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa")!
     private let sourceLink = URL(string: "https://github.com/aepikgamer-art/JetGlass")!
     private let jetapiLink = URL(string: "https://www.jetapi.dev")!
 
@@ -57,8 +59,11 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Link(destination: altStoreDirect) {
-                        Label("Install with AltStore (Direct)", systemImage: "arrow.down.app")
+                    Link(destination: altDirect) {
+                        Label("Add to AltStore via AltDirect", systemImage: "arrow.down.app")
+                    }
+                    Link(destination: ipaDownload) {
+                        Label("Download latest IPA", systemImage: "square.and.arrow.down")
                     }
                     Link(destination: sourceLink) {
                         Label("Source on GitHub", systemImage: "curlybraces")
@@ -66,7 +71,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Install & Source")
                 } footer: {
-                    Text("AltStore Direct installs the latest IPA built by GitHub Actions on macOS 26 (Xcode 26). Requires AltStore on this device.")
+                    Text("AltDirect opens the JetGlass AltStore source in AltStore, SideStore, StikStore, Feather and more. The IPA is built by GitHub Actions on macOS 26 (Xcode 26) and published to Releases.")
                         .font(.caption)
                 }
 
