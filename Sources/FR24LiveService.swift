@@ -97,7 +97,7 @@ final class FR24LiveService {
     private func fetchFR24(latMin: Double, latMax: Double, lonMin: Double, lonMax: Double) async throws -> [LiveAircraft] {
         let bounds = "\(latMax),\(latMin),\(lonMin),\(lonMax)"
         let urlString = "https://data.flightradar24.com/zones/fcgi/feed.js"
-            + "?bounds=\(bounds)&faa=1&sat=1&mlat=1&flarm=1&adsb=1&gnd=0&air=1"
+            + "?bounds=\(bounds)&faa=1&sat=1&mlat=1&flarm=1&adsb=1&gnd=1&air=1"
             + "&vehicles=0&estimated=1&maxage=14400&gliders=0&stats=1"
         guard let url = URL(string: urlString) else { throw LiveFeedError.badResponse }
         let (data, response) = try await session.data(from: url)
@@ -220,4 +220,45 @@ final class FR24LiveService {
             type: nil
         )
     }
+
+    // MARK: - Route lookup (adsbdb)
+
+    func route(callsign: String) async -> ADSBRoute? {
+        let cs = callsign.trimmingCharacters(in: .whitespaces).uppercased()
+        guard cs.count >= 3,
+              let url = URL(string: "https://api.adsbdb.com/v0/callsign/" + cs) else { return nil }
+        guard let (data, response) = try? await session.data(from: url),
+              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+        return (try? JSONDecoder().decode(ADSBDBRouteResponse.self, from: data))?.response?.flightroute
+    }
+}
+
+struct ADSBDBAirport: Codable {
+    let icaoCode: String
+    let iataCode: String
+    let name: String
+    let municipality: String
+    let countryName: String
+    let latitude: Double
+    let longitude: Double
+
+    enum CodingKeys: String, CodingKey {
+        case icaoCode = "icao_code"
+        case iataCode = "iata_code"
+        case name
+        case municipality
+        case countryName = "country_name"
+        case latitude
+        case longitude
+    }
+}
+
+struct ADSBRoute: Codable {
+    let origin: ADSBDBAirport
+    let destination: ADSBDBAirport
+}
+
+struct ADSBDBRouteResponse: Codable {
+    struct Inner: Codable { let flightroute: ADSBRoute? }
+    let response: Inner?
 }

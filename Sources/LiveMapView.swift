@@ -118,7 +118,7 @@ struct MapViewBridge: UIViewRepresentable {
 }
 
 final class PlaneAnnotationView: MKAnnotationView {
-    private let planeIcon = UIImageView()
+    private let planeIcon = UILabel()
     private let label = UILabel()
 
     override var annotation: MKAnnotation? { willSet { configure() } }
@@ -138,17 +138,12 @@ final class PlaneAnnotationView: MKAnnotationView {
         centerOffset = CGPoint(x: 0, y: -10)
         canShowCallout = true
 
-        let iconConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
-        let planeSymbol = UIImage(systemName: "airplane", withConfiguration: iconConfig)?
-            .withTintColor(.white, renderingMode: .alwaysOriginal)
-        planeIcon.image = planeSymbol
+        planeIcon.text = "✈️"
+        planeIcon.font = .systemFont(ofSize: 17)
+        planeIcon.textAlignment = .center
         planeIcon.contentMode = .center
         planeIcon.frame = CGRect(x: 4, y: 4, width: 32, height: 32)
-        planeIcon.layer.cornerRadius = 16
-        planeIcon.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.92)
-        planeIcon.layer.borderWidth = 1.5
-        planeIcon.layer.borderColor = UIColor.white.withAlphaComponent(0.75).cgColor
-        planeIcon.clipsToBounds = true
+        planeIcon.backgroundColor = .clear
         addSubview(planeIcon)
 
         label.font = .systemFont(ofSize: 10, weight: .semibold)
@@ -211,6 +206,27 @@ final class LiveMapModel: ObservableObject {
 
     private let service = FR24LiveService()
     private var refreshTask: Task<Void, Never>?
+    private var lastContact: [String: Date] = [:]
+
+    // Keeps planes inside the visible area alive for a few minutes so one
+    // weak feed poll does not wipe parked or low-signal airport traffic.
+    private func mergedAircraft(_ fetched: [LiveAircraft], region: MKCoordinateRegion) -> [LiveAircraft] {
+        let now = Date()
+        var result = fetched
+        var seen = Set(fetched.map { $0.id })
+        for plane in fetched { lastContact[plane.id] = now }
+        for plane in aircraft where !seen.contains(plane.id) {
+            let inArea = abs(plane.latitude - region.center.latitude) <= region.span.latitudeDelta
+                && abs(plane.longitude - region.center.longitude) <= region.span.longitudeDelta
+            let age = now.timeIntervalSince(lastContact[plane.id] ?? .distantPast)
+            if inArea && age < 300 {
+                seen.insert(plane.id)
+                result.append(plane)
+            }
+        }
+        lastContact = lastContact.filter { now.timeIntervalSince($0.value) < 3600 }
+        return result
+    }
 
     var displayedAircraft: [LiveAircraft] {
         aircraft.filter { plane in
@@ -277,9 +293,9 @@ final class LiveMapModel: ObservableObject {
             do {
                 let planes = try await self.service.aircraft(in: currentRegion)
                 guard !Task.isCancelled else { return }
-                self.aircraft = planes
+                self.aircraft = self.mergedAircraft(planes, region: currentRegion)
                 self.compactLabels = self.displayedAircraft.count >= 20
-                self.lastError = planes.isEmpty
+                self.lastError = self.aircraft.isEmpty
                     ? "No traffic in this area right now — try zooming out."
                     : nil
             } catch {
@@ -343,6 +359,7 @@ struct LiveMapView: View {
     @State private var cardReg: String?
     @State private var cardType: String?
     @State private var cardLoading = false
+    @State private var cardRoute: ADSBRoute?
     @State private var cardExpanded = false
 
     let openPhotosFor: (String) -> Void
@@ -406,6 +423,7 @@ struct LiveMapView: View {
         cardReg = plane.registration
         cardType = plane.type
         cardLoading = true
+        cardRoute = nil
         cardExpanded = false
         let client = JetAPIClient(baseURLString: settings.apiBaseURL)
 
@@ -436,6 +454,12 @@ struct LiveMapView: View {
             }
             guard cardPlane?.id == plane.id else { return }
             cardLoading = false
+
+            if let callsign = plane.flight {
+                let route = await FR24LiveService().route(callsign: callsign)
+                guard cardPlane?.id == plane.id else { return }
+                cardRoute = route
+            }
         }
     }
 
@@ -478,7 +502,28 @@ struct LiveMapView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                if let flight = cardData?.flightRadar?.flights.first {
+                if let route = cardRoute {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(route.origin.iataCode.isEmpty ? route.origin.icaoCode : route.origin.iataCode)
+                                .bold()
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(route.destination.iataCode.isEmpty ? route.destination.icaoCode : route.destination.iataCode)
+                                .bold()
+                            Spacer()
+                            Text("live route")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text("\(route.origin.municipality.isEmpty ? route.origin.name : route.origin.municipality) → \(route.destination.municipality.isEmpty ? route.destination.name : route.destination.municipality)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .font(.subheadline)
+                } else if let flight = cardData?.flightRadar?.flights.first {
                     HStack(spacing: 6) {
                         Text(flight.from)
                             .bold()
@@ -604,6 +649,11 @@ struct LiveMapView: View {
                 if let operatorName = cardData?.flightRadar?.operatorName, !operatorName.isEmpty {
                     infoRow(label: "Operator", value: operatorName)
                 }
+                if let route = cardRoute {
+                    infoRow(label: "Route", value: "\(route.origin.icaoCode) → \(route.destination.icaoCode)")
+                    infoRow(label: "Origin", value: route.origin.name)
+                    infoRow(label: "Destination", value: route.destination.name)
+                }
             }
 
             if let flights = cardData?.flightRadar?.flights, !flights.isEmpty {
@@ -626,12 +676,22 @@ struct LiveMapView: View {
                 }
             }
 
-            if let link = cardData?.jetPhotos?.images.first?.link,
-               let url = URL(string: link.hasPrefix("http") ? link : "https:" + link) {
+            if let url = jetPhotosURL(for: reg) {
                 Link("View on JetPhotos", destination: url)
                     .font(.caption)
             }
         }
+    }
+
+    private func jetPhotosURL(for reg: String) -> URL? {
+        if let link = cardData?.jetPhotos?.images.first?.link,
+           link.contains("jetphotos.com"),
+           link.hasPrefix("http"),
+           let url = URL(string: link) {
+            return url
+        }
+        let query = reg.replacingOccurrences(of: " ", with: "+")
+        return URL(string: "https://www.jetphotos.com/photo/keyword/" + query)
     }
 
     private func infoRow(label: String, value: String) -> some View {
@@ -652,7 +712,12 @@ struct LiveMapView: View {
                 Text(reg)
                     .font(.headline)
                     .lineLimit(1)
-                if let flight = cardData?.flightRadar?.flights.first {
+                if let route = cardRoute {
+                    Text("\(route.origin.iataCode.isEmpty ? route.origin.icaoCode : route.origin.iataCode) → \(route.destination.iataCode.isEmpty ? route.destination.icaoCode : route.destination.iataCode) · \(route.origin.icaoCode) → \(route.destination.icaoCode)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if let flight = cardData?.flightRadar?.flights.first {
                     Text("\(flight.from) → \(flight.to) · \(flight.status)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
