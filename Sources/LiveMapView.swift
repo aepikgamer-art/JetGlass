@@ -163,7 +163,7 @@ final class PlaneAnnotationView: MKAnnotationView {
     }
 
     func setTrack(_ degrees: Double) {
-        planeIcon.transform = CGAffineTransform(rotationAngle: CGFloat(degrees) * .pi / 180)
+        planeIcon.transform = CGAffineTransform(rotationAngle: (CGFloat(degrees) - 45) * .pi / 180)
     }
 
     func setAirlineLabel(visible: Bool, aircraft: LiveAircraft, compact: Bool) {
