@@ -8,9 +8,9 @@ enum LiveFeedError: LocalizedError {
 
 /// Fetches live traffic for the map.
 ///
-/// Primary source: FlightRadar24's public zone feed (as requested). FR24 has been
-/// intermittently blocking that endpoint, so the service automatically falls back
-/// to the OpenSky Network's free live-states API so planes keep showing.
+/// Primary source: adsb.lol's free point API — reliable, no key, and it
+/// includes the aircraft **registration**, so photos can be looked up directly.
+/// Falls back to FlightRadar24's public zone feed, then the OpenSky Network.
 final class FR24LiveService {
     private let session: URLSession
 
@@ -24,21 +24,87 @@ final class FR24LiveService {
         self.session = URLSession(configuration: config)
     }
 
-    /// Fetch aircraft currently within `region`. Tries FR24 first, falls back to OpenSky.
+    /// Fetch aircraft currently within `region`. Tries adsb.lol first, then FR24, then OpenSky.
     func aircraft(in region: MKCoordinateRegion) async throws -> [LiveAircraft] {
         let latMin = max(-90.0, region.center.latitude - region.span.latitudeDelta)
         let latMax = min(90.0, region.center.latitude + region.span.latitudeDelta)
         let lonMin = max(-180.0, region.center.longitude - region.span.longitudeDelta)
         let lonMax = min(180.0, region.center.longitude + region.span.longitudeDelta)
 
-        // 1. FlightRadar24 zone feed
+        // 1. adsb.lol point feed (free, no key, has registrations)
+        if let planes = try? await fetchADSBLoL(center: region.center, region: region), !planes.isEmpty {
+            return planes.filter {
+                $0.latitude >= latMin && $0.latitude <= latMax &&
+                $0.longitude >= lonMin && $0.longitude <= lonMax
+            }
+        }
+
+        // 2. FlightRadar24 zone feed
         if let planes = try? await fetchFR24(latMin: latMin, latMax: latMax, lonMin: lonMin, lonMax: lonMax),
            !planes.isEmpty {
             return planes
         }
 
-        // 2. OpenSky fallback (free, no key)
+        // 3. OpenSky fallback (free, no key)
         return try await fetchOpenSky(latMin: latMin, latMax: latMax, lonMin: lonMin, lonMax: lonMax)
+    }
+
+    // MARK: - adsb.lol (primary)
+
+    private func fetchADSBLoL(center: CLLocationCoordinate2D, region: MKCoordinateRegion) async throws -> [LiveAircraft] {
+        // adsb.lol serves a radius in nautical miles (max 250).
+        let lonScale = abs(cos(center.latitude * .pi / 180))
+        let spanNm = max(region.span.latitudeDelta, region.span.longitudeDelta * lonScale) * 69.0
+        let radius = min(250.0, max(25.0, spanNm * 0.75))
+        let urlString = "https://api.adsb.lol/v2/point/\(center.latitude)/\(center.longitude)/\(Int(radius))"
+        guard let url = URL(string: urlString) else { throw LiveFeedError.badResponse }
+        let (data, response) = try await session.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw LiveFeedError.badResponse
+        }
+        return try Self.parseADSBLoL(data)
+    }
+
+    /// adsb.lol /v2/point: {"ac": [{"hex","flight","r","t","alt_baro","gs","track","lat","lon",…}], …}
+    static func parseADSBLoL(_ data: Data) throws -> [LiveAircraft] {
+        let json = try? JSONSerialization.jsonObject(with: data)
+        guard let object = json as? [String: Any], let ac = object["ac"] as? [[String: Any]] else {
+            throw LiveFeedError.badResponse
+        }
+        return ac.compactMap(Self.aircraft(fromADSBLoLRow:))
+    }
+
+    static func aircraft(fromADSBLoLRow ac: [String: Any]) -> LiveAircraft? {
+        guard let lat = (ac["lat"] as? NSNumber)?.doubleValue,
+              let lon = (ac["lon"] as? NSNumber)?.doubleValue else { return nil }
+
+        let modeS = ((ac["hex"] as? String) ?? "??????").trimmingCharacters(in: .whitespaces)
+        let flight = (ac["flight"] as? String)?.trimmingCharacters(in: .whitespaces)
+        let registration = (ac["r"] as? String)?.trimmingCharacters(in: .whitespaces)
+
+        var altitudeFeet = 0
+        if let alt = ac["alt_baro"] as? NSNumber {
+            altitudeFeet = alt.intValue
+        } else if let alt = ac["alt_baro"] as? String {
+            altitudeFeet = alt.lowercased() == "ground" ? 0 : (Int(alt) ?? 0)
+        }
+        let speedKnots = Int((ac["gs"] as? NSNumber)?.doubleValue ?? 0)
+        let track = (ac["track"] as? NSNumber)?.doubleValue ?? 0
+
+        // modeS is the stable identity across refreshes and feeds.
+        let id = modeS
+        return LiveAircraft(
+            id: id,
+            modeS: modeS,
+            registration: registration.isEmpty ? nil : registration,
+            flight: (flight?.isEmpty == false) ? flight : nil,
+            latitude: lat,
+            longitude: lon,
+            track: track,
+            altitudeFeet: altitudeFeet,
+            speedKnots: speedKnots,
+            airlineName: AirlineNames.name(forFlight: flight)
+        )
     }
 
     // MARK: - FlightRadar24
@@ -97,7 +163,7 @@ final class FR24LiveService {
         let modeS = strings.first(where: { $0.count == 6 && $0.allSatisfy({ $0.isHexDigit }) }) ?? (flight ?? "")
         let registration = strings.first(where: { $0 != flight && $0.count >= 3 && $0.count <= 12 && !$0.contains(" ") && $0 != modeS })
 
-        let id = flight ?? modeS
+        let id = flight ?? modeL
         guard !id.isEmpty else { return nil }
 
         return LiveAircraft(
@@ -158,10 +224,10 @@ final class FR24LiveService {
 
         let altitudeFeet = onGround ? 0 : Int((baroAltM ?? 0) * 3.28084)
         let speedKnots = Int(velocity * 1.94384)
-        let id = callsign ?? modeS
 
+        // modeS identity keeps annotations stable across refreshes.
         return LiveAircraft(
-            id: id,
+            id: modeS,
             modeS: modeS,
             registration: nil,
             flight: callsign,
