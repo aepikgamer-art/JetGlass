@@ -109,7 +109,7 @@ struct MapViewBridge: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
             guard let plane = view.annotation as? PlaneAnnotation else { return }
-            mapView.deselectAnnotation(plane.annotation, animated: false)
+            mapView.deselectAnnotation(plane, animated: false)
             parent.model.onSelectAircraft(plane.aircraft)
         }
     }

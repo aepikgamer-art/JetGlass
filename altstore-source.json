@@ -10,9 +10,9 @@
       "subtitle": "Liquid Glass plane spotter",
       "localizedDescription": "JetPhotos + FlightRadar24 in a liquid-glass iOS 26 app. Live map with airline labels and ICAO airport search, photo search and downloads via jetapi.dev.",
       "tintColor": "#32ADE6",
-      "version": "1.0.2",
-      "versionDate": "2026-11-05T10:30:00Z",
-      "versionDescription": "Top glass info card on the live map (photo + details without leaving the map), smaller flight labels when crowded.",
+      "version": "1.0.3",
+      "versionDate": "2026-11-05T11:00:00Z",
+      "versionDescription": "Build fix for v1.0.2 — top glass info card on the live map (photo + details without leaving the map), smaller flight labels when crowded.",
       "downloadURL": "https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa"
     }
   ]
