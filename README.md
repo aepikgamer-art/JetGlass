@@ -1,3 +1,9 @@
+<h3 align="center">
+<a href="https://altdirect.app/?url=https://raw.githubusercontent.com/aepikgamer-art/JetGlass/main/altstore-source.json"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" target="_blank" width="200"></a>
+&nbsp;
+<a href="https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa"><img src="https://altdirect.app/assets/png/Download_Blue.png" target="_blank" width="200"></a>
+</h3>
+
 # ✈️ JetGlass
 
 A liquid-glass iOS app for plane spotters. Built with SwiftUI for **iOS 26** (Liquid Glass design), on **Apple Maps (MapKit)**.
@@ -13,19 +19,15 @@ A liquid-glass iOS app for plane spotters. Built with SwiftUI for **iOS 26** (Li
   - Pulls photos + metadata from [JetPhotos] via [jetapi.dev], and flight history from [FlightRadar24] via the same API.
   - Tap a photo for the full-screen view, then **download it to your photo library**, share it, or open the **Source** page on JetPhotos.
 - **Settings tab**
-  - JetAPI base URL, photo/flight counts, map refresh interval, airline labels, haptics, clear image cache, **AltStore Direct install link**, source links, about & credits.
+  - JetAPI base URL, photo/flight counts, map refresh interval, airline labels, haptics, clear image cache, **AltDirect source link**, direct IPA download, source links, about & credits.
 
 ## Install
 
-- **AltStore Direct (recommended):** with AltStore installed, open the *Install with AltStore (Direct)* link in the app's Settings tab, or paste this in Safari:
+- **AltDirect (recommended):** tap the *Add AltSource* badge above, or open
+  `https://altdirect.app/?url=https://raw.githubusercontent.com/aepikgamer-art/JetGlass/main/altstore-source.json`
+  — it gives one-tap **Open in AltStore / SideStore / StikStore / Feather / TrollApps** buttons that add the JetGlass source. AltStore will then install and refresh JetGlass like any source app. (Unsigned app — it still gets sideloaded with your own Apple ID.)
 
-  ```
-  altstore://install?url=https%3A%2F%2Fnightly.link%2Faepikgamer-art%2FJetGlass%2Fworkflows%2FBuild%2520IPA%2Fmain%2FJetGlass-ipa.zip
-  ```
-
-  It points at the latest IPA built by GitHub Actions via [nightly.link] (direct artifact download, no GitHub login needed).
-
-- **Manual:** Actions tab → **Build IPA** → download the `JetGlass-ipa` artifact → sideload with AltStore / SideStore / Sideloadly, or re-sign it yourself:
+- **Direct download:** tap the *Download .ipa* badge above, or grab [`JetGlass.ipa`](https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa) from the [latest release](https://github.com/aepikgamer-art/JetGlass/releases/latest), then sideload with AltStore / SideStore / Sideloadly, or re-sign it yourself:
 
 ```bash
 codesign -f -s "Apple Development: ..." --entitlements JetGlass.entitlements Payload/JetGlass.app
@@ -34,12 +36,9 @@ zip -r JetGlass-signed.ipa Payload
 
 ## Building the IPA
 
-GitHub Actions builds an **unsigned IPA** on every push to `main` (also manually via *Run workflow*).
+GitHub Actions builds an **unsigned IPA** on every push to `main` and **publishes a GitHub Release with the IPA on every `v*` tag**.
 
 - Runs on the **`macos-26`** runner with **Xcode 26** — required so the iOS 26 **Liquid Glass** APIs (`glassEffect`, `GlassEffectContainer`, `.buttonStyle(.glass)`) compile. The workflow fails fast if it ever lands on an Xcode older than 26.
-
-1. Go to the **Actions** tab → **Build IPA** → grab the `JetGlass-ipa` artifact.
-2. Sideload or re-sign as above.
 
 Local build (needs Xcode 26 + [XcodeGen]):
 
@@ -53,10 +52,11 @@ xcodebuild -scheme JetGlass -destination 'generic/platform=iOS' CODE_SIGNING_ALL
 - SwiftUI + **Apple Maps (MapKit)**, iOS 26 Liquid Glass (`glassEffect`, `GlassEffectContainer`, `.buttonStyle(.glass)`)
 - [jetapi.dev] — aircraft data from JetPhotos + FlightRadar24
 - FlightRadar24 public zone feed for live traffic
+- [AltDirect] for AltStore source distribution
 - XcodeGen project generation, no `.xcodeproj` checked in
 
 [jetapi.dev]: https://www.jetapi.dev
 [JetPhotos]: https://www.jetphotos.com
 [FlightRadar24]: https://www.flightradar24.com
 [XcodeGen]: https://github.com/yonaskolb/XcodeGen
-[nightly.link]: https://nightly.link
+[AltDirect]: https://altdirect.app

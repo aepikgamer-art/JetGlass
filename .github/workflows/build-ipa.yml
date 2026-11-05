@@ -3,7 +3,11 @@ name: Build IPA
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -60,6 +64,24 @@ jobs:
           name: JetGlass-ipa
           path: build/JetGlass.ipa
           retention-days: 30
+
+      - name: Create GitHub Release with the IPA
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" build/JetGlass.ipa \
+            --title "JetGlass ${GITHUB_REF_NAME}" \
+            --notes "Unsigned IPA built on macOS 26 with Xcode 26 (iOS 26 Liquid Glass).
+
+          **Download:** \`JetGlass.ipa\` below, or the permanent link: https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa
+
+          **Add to AltStore / SideStore / StikStore via AltDirect:** https://altdirect.app/?url=https%3A%2F%2Fraw.githubusercontent.com%2Faepikgamer-art%2FJetGlass%2Fmain%2Faltstore-source.json
+
+          **Source:** https://github.com/aepikgamer-art/JetGlass
+
+          Sideload with AltStore (Classic), SideStore, or Sideloadly. Not App Store signed." \
+            || gh release upload "${GITHUB_REF_NAME}" build/JetGlass.ipa --clobber
 
       - name: Upload xcarchive logs on failure
         if: failure()
