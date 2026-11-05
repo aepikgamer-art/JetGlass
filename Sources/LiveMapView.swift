@@ -56,7 +56,9 @@ struct MapViewBridge: UIViewRepresentable {
 
         for case let plane as PlaneAnnotation in map.annotations {
             if let view = map.view(for: plane) as? PlaneAnnotationView {
-                view.setAirlineLabel(visible: showAirlineLabels, aircraft: plane.aircraft)
+                view.setAirlineLabel(visible: showAirlineLabels,
+                                     aircraft: plane.aircraft,
+                                     compact: model.compactLabels)
             }
         }
     }
@@ -84,7 +86,9 @@ struct MapViewBridge: UIViewRepresentable {
                 let view = (mapView.dequeueReusableAnnotationView(withIdentifier: "plane") as? PlaneAnnotationView)
                     ?? PlaneAnnotationView(annotation: plane, reuseIdentifier: "plane")
                 view.annotation = plane
-                view.setAirlineLabel(visible: parent.showAirlineLabels, aircraft: plane.aircraft)
+                view.setAirlineLabel(visible: parent.showAirlineLabels,
+                                     aircraft: plane.aircraft,
+                                     compact: parent.model.compactLabels)
                 return view
             }
             if let airport = annotation as? AirportAnnotation {
@@ -102,11 +106,17 @@ struct MapViewBridge: UIViewRepresentable {
             guard let plane = view.annotation as? PlaneAnnotation else { return }
             parent.model.onSelectAircraft(plane.aircraft)
         }
+
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            guard let plane = view.annotation as? PlaneAnnotation else { return }
+            mapView.deselectAnnotation(plane.annotation, animated: false)
+            parent.model.onSelectAircraft(plane.aircraft)
+        }
     }
 }
 
 /// ✈️ plane emoji annotation that rotates with the aircraft's track,
-/// with an optional airline label above.
+/// with an airline label above that shrinks when the sky gets crowded.
 final class PlaneAnnotationView: MKAnnotationView {
     private let planeEmoji = UILabel()
     private let label = UILabel()
@@ -149,19 +159,28 @@ final class PlaneAnnotationView: MKAnnotationView {
 
     private func configure() {
         guard let plane = annotation as? PlaneAnnotation else { return }
-        // Rotate just the emoji so the airline label stays horizontal.
+        // Rotate just the emoji so the label stays horizontal.
         planeEmoji.transform = CGAffineTransform(rotationAngle: CGFloat(plane.aircraft.track) * .pi / 180)
-        setAirlineLabel(visible: label.superview != nil, aircraft: plane.aircraft)
+        setAirlineLabel(visible: label.superview != nil, aircraft: plane.aircraft, compact: false)
     }
 
-    func setAirlineLabel(visible: Bool, aircraft: LiveAircraft) {
+    func setAirlineLabel(visible: Bool, aircraft: LiveAircraft, compact: Bool) {
         let text = aircraft.airlineName ?? aircraft.flight
-        if visible, let text {
-            label.text = " \(text) · \(aircraft.altitudeDisplay) "
-            label.isHidden = false
-        } else {
+        guard visible, let text else {
             label.isHidden = true
+            return
         }
+        if compact {
+            // Crowded sky: tiny text, callsign only — less overlap.
+            label.font = .systemFont(ofSize: 7, weight: .medium)
+            label.text = " \(aircraft.flight ?? text) "
+            label.frame = CGRect(x: -14, y: -12, width: 68, height: 12)
+        } else {
+            label.font = .systemFont(ofSize: 10, weight: .semibold)
+            label.text = " \(text) · \(aircraft.altitudeDisplay) "
+            label.frame = CGRect(x: -20, y: -16, width: 80, height: 16)
+        }
+        label.isHidden = false
     }
 }
 
@@ -172,6 +191,7 @@ final class LiveMapModel: ObservableObject {
     @Published var aircraft: [LiveAircraft] = []
     @Published var isRefreshing = false
     @Published var lastError: String?
+    @Published var compactLabels = false
     @Published var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 39.17, longitude: -96.5), // Sioux City / heartland default
         span: MKCoordinateSpan(latitudeDelta: 5, longitudeDelta: 5)
@@ -194,6 +214,8 @@ final class LiveMapModel: ObservableObject {
                 let planes = try await self.service.aircraft(in: currentRegion)
                 guard !Task.isCancelled else { return }
                 self.aircraft = planes
+                // Shrink flight text when there are too many planes on screen.
+                self.compactLabels = planes.count >= 20
                 self.lastError = planes.isEmpty
                     ? "No traffic in this area right now — try zooming out."
                     : nil
@@ -244,6 +266,11 @@ struct LiveMapView: View {
     @State private var results: [Airport] = []
     @State private var showAirlineLabels: Bool = true
 
+    // Plane info card (photo + details at the top of the map)
+    @State private var cardPlane: LiveAircraft?
+    @State private var cardData: JetAPIResponse?
+    @State private var cardLoading = false
+
     let openPhotosFor: (String) -> Void
 
     var body: some View {
@@ -251,19 +278,26 @@ struct LiveMapView: View {
             mapView
                 .ignoresSafeArea(edges: .bottom)
 
-            VStack {
+            VStack(spacing: 10) {
                 glassSearchBar
+
+                if let plane = cardPlane {
+                    planeCard(plane)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 Spacer()
                 glassStatus
             }
             .padding()
+            .animation(.spring(duration: 0.3), value: cardPlane)
         }
         .toolbar(.hidden, for: .navigationBar) // no top title bar
         .onAppear {
             showAirlineLabels = settings.showAirlineLabels
             model.showAirlineLabels = settings.showAirlineLabels
             model.onSelectAircraft = { plane in
-                openPhotosFor(plane.flight ?? plane.id)
+                showCard(for: plane)
             }
             model.refresh()
         }
@@ -285,6 +319,110 @@ struct LiveMapView: View {
     private var mapView: MapViewBridge {
         MapViewBridge(model: model, showAirlineLabels: showAirlineLabels)
     }
+
+    // MARK: Plane info card
+
+    private func showCard(for plane: LiveAircraft) {
+        cardPlane = plane
+        cardData = nil
+        cardLoading = true
+        let client = JetAPIClient(baseURLString: settings.apiBaseURL)
+        Task {
+            let data = try? await client.lookup(
+                query: plane.registration ?? plane.flight ?? plane.id,
+                photos: 4, flights: 5
+            )
+            // Card may have been closed/changed while fetching.
+            guard cardPlane?.id == plane.id else { return }
+            cardData = data
+            cardLoading = false
+        }
+    }
+
+    private func planeCard(_ plane: LiveAircraft) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                if let photo = cardData?.jetPhotos?.images.first, let thumb = photo.thumbnailURL {
+                    AsyncImage(url: thumb) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Rectangle().fill(.quaternary)
+                        }
+                    }
+                    .frame(width: 64, height: 64)
+                    .clipShape(.rect(cornerRadius: 12))
+                } else if cardLoading {
+                    ProgressView()
+                        .frame(width: 64, height: 64)
+                } else {
+                    Image(systemName: "airplane")
+                        .font(.title2)
+                        .frame(width: 64, height: 64)
+                        .background(.quaternary, in: .rect(cornerRadius: 12))
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(cardData?.flightRadar?.aircraft.isEmpty == false
+                         ? cardData?.flightRadar?.aircraft ?? plane.id : plane.id)
+                        .font(.headline)
+                    Text(cardData?.flightRadar?.airline.isEmpty == false
+                         ? cardData?.flightRadar?.airline ?? "" : (plane.airlineName ?? ""))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("\(plane.altitudeDisplay) · \(plane.speedKnots) kt · \(plane.coordinateDescription)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button {
+                    withAnimation { cardPlane = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let photo = cardData?.jetPhotos?.images.first {
+                Text("\(photo.aircraft) · \(photo.location) · \(photo.photographer)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if cardLoading {
+                Text("Looking up photos…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No JetPhotos match — showing live data.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let flight = cardData?.flightRadar?.flights.first {
+                Text("Last flight: \(flight.flight) \(flight.routeDisplay) · \(flight.status)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            HStack {
+                Button {
+                    openPhotosFor(plane.registration ?? plane.flight ?? plane.id)
+                } label: {
+                    Label("Open in Photos", systemImage: "photo.stack")
+                        .font(.caption)
+                }
+                .buttonStyle(.glass)
+                Spacer()
+            }
+        }
+        .glassCard(cornerRadius: 24)
+        .padding(.horizontal, 8)
+    }
+
+    // MARK: Search + status
 
     private var glassSearchBar: some View {
         VStack(spacing: 8) {
