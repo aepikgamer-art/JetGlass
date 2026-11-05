@@ -997,7 +997,7 @@ struct LiveMapView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(airport.icao)
                         .font(.title3.bold())
-                    Text("' + I + 'airport.name) · ' + I + 'airport.city), ' + I + 'airport.country)")
+                    Text("\(airport.name) · \(airport.city), \(airport.country)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -1029,8 +1029,8 @@ struct LiveMapView: View {
                 let flights = arrDepMode == 0 ? arrFlights : depFlights
                 if flights.isEmpty {
                     Text(arrDepMode == 0
-                         ? "No arrivals tracked near ' + I + 'airport.icao) right now."
-                         : "No departures tracked near ' + I + 'airport.icao) right now.")
+                         ? "No arrivals tracked near \(airport.icao) right now."
+                         : "No departures tracked near \(airport.icao) right now.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 24)
@@ -1068,14 +1068,14 @@ struct LiveMapView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.plane.flight ?? item.plane.registration ?? item.plane.modeS.uppercased())
                     .font(.subheadline.bold())
-                Text(isArrival ? "from ' + I + 'item.route.origin.icaoCode)" : "to ' + I + 'item.route.destination.icaoCode)")
+                Text(isArrival ? "from \(item.route.origin.icaoCode)" : "to \(item.route.destination.icaoCode)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 1) {
                 Text(item.plane.altitudeDisplay)
-                Text("' + I + 'item.plane.speedKnots) kt")
+                Text("\(item.plane.speedKnots) kt")
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.tertiary)
