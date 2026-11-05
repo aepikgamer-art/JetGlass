@@ -111,12 +111,6 @@ struct MapViewBridge: UIViewRepresentable {
             return nil
         }
 
-        func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView,
-                    calloutAccessoryControlTapped control: UIControl) {
-            guard let plane = view.annotation as? PlaneAnnotation else { return }
-            parent.model.onSelectAircraft(plane.aircraft)
-        }
-
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
             guard let plane = view.annotation as? PlaneAnnotation else { return }
             mapView.deselectAnnotation(plane, animated: false)
@@ -125,10 +119,11 @@ struct MapViewBridge: UIViewRepresentable {
     }
 }
 
-/// ✈️ plane emoji annotation that rotates with the aircraft's track,
-/// with an airline label above that shrinks when the sky gets crowded.
+/// Plane annotation with a real SF Symbol airplane silhouette on a small glass
+/// badge, rotated to the aircraft's true heading, plus an airline label above
+/// that shrinks when the sky gets crowded.
 final class PlaneAnnotationView: MKAnnotationView {
-    private let planeEmoji = UILabel()
+    private let planeIcon = UIImageView()
     private let label = UILabel()
 
     override var annotation: MKAnnotation? { willSet { configure() } }
@@ -148,11 +143,19 @@ final class PlaneAnnotationView: MKAnnotationView {
         centerOffset = CGPoint(x: 0, y: -10)
         canShowCallout = true
 
-        planeEmoji.text = "✈️"
-        planeEmoji.font = .systemFont(ofSize: 26)
-        planeEmoji.frame = CGRect(x: 6, y: 8, width: 28, height: 28)
-        planeEmoji.textAlignment = .center
-        addSubview(planeEmoji)
+        // Real plane silhouette (SF Symbol) on a circular glass badge.
+        let iconConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
+        let planeSymbol = UIImage(systemName: "airplane", withConfiguration: iconConfig)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal)
+        planeIcon.image = planeSymbol
+        planeIcon.contentMode = .center
+        planeIcon.frame = CGRect(x: 4, y: 4, width: 32, height: 32)
+        planeIcon.layer.cornerRadius = 16
+        planeIcon.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.92)
+        planeIcon.layer.borderWidth = 1.5
+        planeIcon.layer.borderColor = UIColor.white.withAlphaComponent(0.75).cgColor
+        planeIcon.clipsToBounds = true
+        addSubview(planeIcon)
 
         label.font = .systemFont(ofSize: 10, weight: .semibold)
         label.textColor = .white
@@ -162,9 +165,6 @@ final class PlaneAnnotationView: MKAnnotationView {
         label.textAlignment = .center
         label.frame = CGRect(x: -20, y: -16, width: 80, height: 16)
         addSubview(label)
-
-        let detail = UIButton(type: .detailDisclosure)
-        rightCalloutAccessoryView = detail
     }
 
     private func configure() {
@@ -174,8 +174,8 @@ final class PlaneAnnotationView: MKAnnotationView {
     }
 
     func setTrack(_ degrees: Double) {
-        // Rotate just the emoji so the label stays horizontal.
-        planeEmoji.transform = CGAffineTransform(rotationAngle: CGFloat(degrees) * .pi / 180)
+        // Rotate the plane icon with the aircraft's true heading.
+        planeIcon.transform = CGAffineTransform(rotationAngle: CGFloat(degrees) * .pi / 180)
     }
 
     func setAirlineLabel(visible: Bool, aircraft: LiveAircraft, compact: Bool) {
@@ -185,7 +185,7 @@ final class PlaneAnnotationView: MKAnnotationView {
             return
         }
         if compact {
-            // Crowded sky: tiny text, callsign only — less overlap.
+            // Crowded sky: tiny text, callsign only.
             label.font = .systemFont(ofSize: 7, weight: .medium)
             label.text = " \(aircraft.flight ?? text) "
             label.frame = CGRect(x: -14, y: -12, width: 68, height: 12)
@@ -228,7 +228,6 @@ final class LiveMapModel: ObservableObject {
                 let planes = try await self.service.aircraft(in: currentRegion)
                 guard !Task.isCancelled else { return }
                 self.aircraft = planes
-                // Shrink flight text when there are too many planes on screen.
                 self.compactLabels = planes.count >= 20
                 self.lastError = planes.isEmpty
                     ? "No traffic in this area right now — try zooming out."
@@ -253,7 +252,6 @@ final class LiveMapModel: ObservableObject {
         }
         for plane in aircraft {
             if let existing = byID[plane.id] {
-                // Same plane — glide it to its new position/heading.
                 existing.update(plane)
             } else {
                 map.addAnnotation(PlaneAnnotation(plane))
@@ -288,12 +286,12 @@ struct LiveMapView: View {
     @State private var results: [Airport] = []
     @State private var showAirlineLabels: Bool = true
 
-    // Plane info card (FR24-style: photo banner + details below)
     @State private var cardPlane: LiveAircraft?
     @State private var cardData: JetAPIResponse?
     @State private var cardReg: String?
     @State private var cardType: String?
     @State private var cardLoading = false
+    @State private var cardExpanded = false
 
     let openPhotosFor: (String) -> Void
 
@@ -318,10 +316,9 @@ struct LiveMapView: View {
             .padding()
             .animation(.spring(duration: 0.3), value: cardPlane)
         }
-        .toolbar(.hidden, for: .navigationBar) // no top title bar
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             showAirlineLabels = settings.showAirlineLabels
-
             model.showAirlineLabels = settings.showAirlineLabels
             model.onSelectAircraft = { plane in
                 showCard(for: plane)
@@ -355,11 +352,12 @@ struct LiveMapView: View {
         cardReg = plane.registration
         cardType = nil
         cardLoading = true
+        cardExpanded = false
         let client = JetAPIClient(baseURLString: settings.apiBaseURL)
 
         Task {
             // Resolve the registration from the mode S hex (adsbdb.com),
-            // then search jetapi by registration — not callsign.
+            // then search jetapi by registration.
             var reg = plane.registration
             if reg == nil {
                 if let info = await AircraftRegistry.shared.info(for: plane.modeS) {
@@ -374,7 +372,7 @@ struct LiveMapView: View {
             cardReg = reg
 
             let query = reg ?? plane.flight ?? plane.id
-            if let data = try? await client.lookup(query: query, photos: 4, flights: 5) {
+            if let data = try? await client.lookup(query: query, photos: 6, flights: 5) {
                 guard cardPlane?.id == plane.id else { return }
                 cardData = data
 
@@ -399,6 +397,7 @@ struct LiveMapView: View {
     }
 
     /// FR24-style portrait card: big photo banner up top, details underneath.
+    /// Pull down (or tap More info) to reveal extra details.
     private func fullPlaneCard(_ plane: LiveAircraft, reg: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Big photo banner across the top of the card.
@@ -429,7 +428,6 @@ struct LiveMapView: View {
                     .lineLimit(1)
 
                 if let flight = cardData?.flightRadar?.flights.first {
-                    // Route row like the FR24 panel: FROM → TO with times.
                     HStack(spacing: 6) {
                         Text(flight.from)
                             .bold()
@@ -448,7 +446,6 @@ struct LiveMapView: View {
                     .lineLimit(1)
                 }
 
-                // Live airspeed + current altitude.
                 HStack(spacing: 10) {
                     Label("\(plane.speedKnots) kt", systemImage: "speedometer")
                     Label("\(plane.altitudeFeet) ft", systemImage: "arrow.up")
@@ -472,6 +469,10 @@ struct LiveMapView: View {
                         .lineLimit(1)
                 }
 
+                if cardExpanded {
+                    cardExpandedInfo(plane, reg: reg)
+                }
+
                 HStack {
                     Button {
                         openPhotosFor(reg)
@@ -481,12 +482,113 @@ struct LiveMapView: View {
                     }
                     .buttonStyle(.glass)
                     Spacer()
+                    Button {
+                        withAnimation(.spring(duration: 0.35)) { cardExpanded.toggle() }
+                    } label: {
+                        Label(cardExpanded ? "Less" : "More info",
+                              systemImage: cardExpanded ? "chevron.up.circle" : "chevron.down.circle")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.glass)
                 }
             }
             .padding(14)
         }
         .glassCard(cornerRadius: 24)
         .padding(.horizontal, 8)
+        .gesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    if value.translation.height > 25, !cardExpanded {
+                        withAnimation(.spring(duration: 0.35)) { cardExpanded = true }
+                    } else if value.translation.height < -25, cardExpanded {
+                        withAnimation(.spring(duration: 0.35)) { cardExpanded = false }
+                    }
+                }
+        )
+    }
+
+    /// Extra details revealed when the card is pulled down.
+    @ViewBuilder
+    private func cardExpandedInfo(_ plane: LiveAircraft, reg: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+
+            if let images = cardData?.jetPhotos?.images, images.count > 1 {
+                Text("Photos")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(images.prefix(6).enumerated()), id: \.offset) { _, img in
+                            if let url = img.thumbnailURL ?? img.imageURL {
+                                AsyncImage(url: url) { phase in
+                                    if case .success(let image) = phase {
+                                        image.resizable().scaledToFill()
+                                    } else {
+                                        Rectangle().fill(.quaternary)
+                                    }
+                                }
+                                .frame(width: 96, height: 64)
+                                .clipShape(.rect(cornerRadius: 10))
+                            }
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Aircraft")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                infoRow(label: "Mode S", value: plane.modeS.uppercased())
+                if let serial = cardData?.jetPhotos?.images.first?.serial, !serial.isEmpty {
+                    infoRow(label: "Serial", value: serial)
+                }
+                if let typeCode = cardData?.flightRadar?.typeCode, !typeCode.isEmpty {
+                    infoRow(label: "Type code", value: typeCode)
+                }
+                if let operatorName = cardData?.flightRadar?.operatorName, !operatorName.isEmpty {
+                    infoRow(label: "Operator", value: operatorName)
+                }
+            }
+
+            if let flights = cardData?.flightRadar?.flights, !flights.isEmpty {
+                Text("Recent flights")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(flights.prefix(5).enumerated()), id: \.offset) { _, f in
+                        HStack {
+                            Text(f.date)
+                                .foregroundStyle(.secondary)
+                            Text("\(f.from) → \(f.to)")
+                            Spacer()
+                            Text(f.flightTime.isEmpty ? f.status : f.flightTime)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .lineLimit(1)
+                    }
+                }
+            }
+
+            if let link = cardData?.jetPhotos?.images.first?.link,
+               let url = URL(string: link.hasPrefix("http") ? link : "https:" + link) {
+                Link("View on JetPhotos", destination: url)
+                    .font(.caption)
+            }
+        }
+    }
+
+    private func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+        }
+        .font(.caption)
     }
 
     /// Landscape card — photo banner on the left, details on the right, one compact row.
@@ -533,9 +635,8 @@ struct LiveMapView: View {
     }
 
     private var closeButton: some View {
-
         Button {
-            withAnimation { cardPlane = nil }
+            withAnimation { cardPlane = nil; cardExpanded = false }
         } label: {
             Image(systemName: "xmark.circle.fill")
                 .font(.title2)
@@ -609,8 +710,8 @@ struct LiveMapView: View {
                                 Spacer()
                                 Text("\(airport.city), \(airport.country)")
                                     .font(.caption)
-                                   .foregroundStyle(.secondary)
-                                     .lineLimit(1)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
                         }
                         .buttonStyle(.plain)
@@ -646,8 +747,7 @@ struct LiveMapView: View {
             }
 
             Text("\(model.aircraft.count) aircraft")
-    
-            .font(.caption.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .glassCard()
