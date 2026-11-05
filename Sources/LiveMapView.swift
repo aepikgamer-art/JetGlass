@@ -1045,14 +1045,20 @@ struct LiveMapView: View {
                 }
             }
 
-            Button {
-                airportSheet = nil
-                goTo(airport)
-            } label: {
-                Label("Move to it", systemImage: "location.magnifyingglass")
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 10) {
+                Button {
+                    airportSheet = nil
+                    goTo(airport)
+                } label: {
+                    Label("Move to it", systemImage: "location.magnifyingglass")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+
+                // LiveATC.net allows linking to their homepage only, not stream pages.
+                Link("LiveATC", destination: URL(string: "https://www.liveatc.net")!)
+                    .buttonStyle(.glass)
             }
-            .buttonStyle(.glass)
         }
         .padding()
         .presentationDetents([.medium, .large])
