@@ -10,9 +10,9 @@
       "subtitle": "Liquid Glass plane spotter",
       "localizedDescription": "JetPhotos + FlightRadar24 in a liquid-glass iOS 26 app. Live map with airline labels and ICAO airport search, photo search and downloads via jetapi.dev.",
       "tintColor": "#32ADE6",
-      "version": "1.0.4",
-      "versionDate": "2026-11-05T21:00:00Z",
-      "versionDescription": "Plane photos now resolve the aircraft registration (adsbdb.com) before searching jetapi.dev, so photos actually show. Info card displays registration, airspeed and current altitude, with a compact landscape layout. Photos search uses the registration instead of the flight number.",
+      "version": "1.0.5",
+      "versionDate": "2026-11-05T23:30:00Z",
+      "versionDescription": "FR24-style plane card: big photo banner on top with details underneath (route with times, airspeed, altitude). Live traffic now comes from adsb.lol first — more planes on the map, and registrations included so photos work. Planes now glide to their new positions between refreshes.",
       "downloadURL": "https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa"
     }
   ]
