@@ -233,7 +233,7 @@ struct PhotoDetailView: View {
                         Button {
                             if let link = URL(string: photo.link) { openURL(link) }
                         } label: {
-                            Label("JetPhotos", systemImage: "safari")
+                            Label("Source", systemImage: "link")
                         }
                         .buttonStyle(.glass)
                     }

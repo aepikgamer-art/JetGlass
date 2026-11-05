@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
+    # macOS 26 runner → Xcode 26 SDK → iOS 26 Liquid Glass APIs compile.
     runs-on: macos-26
     timeout-minutes: 45
 
@@ -15,12 +16,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select newest Xcode
+      - name: Select newest Xcode (must be 26+ for Liquid Glass)
         run: |
           XCODE_APP=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
           echo "Using $XCODE_APP"
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
+          XCODE_MAJOR=$(xcodebuild -version | awk '{print $2; exit}' | cut -d. -f1)
+          if [ "$XCODE_MAJOR" -lt 26 ]; then
+            echo "::error::Xcode 26+ is required for iOS 26 Liquid Glass (glassEffect). Found $(xcodebuild -version)."
+            exit 1
+          fi
 
       - name: Install XcodeGen
         run: brew install xcodegen
