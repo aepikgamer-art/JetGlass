@@ -36,7 +36,6 @@ struct MapViewBridge: UIViewRepresentable {
         map.showsCompass = true
         map.pointOfInterestFilter = .excludingAll
         map.mapType = .standard
-        map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: "plane")
         map.setRegion(model.region, animated: false)
         return map
     }
@@ -106,8 +105,10 @@ struct MapViewBridge: UIViewRepresentable {
     }
 }
 
-/// Plane icon that rotates with the aircraft's track and can show an airline label above.
+/// ✈️ plane emoji annotation that rotates with the aircraft's track,
+/// with an optional airline label above.
 final class PlaneAnnotationView: MKAnnotationView {
+    private let planeEmoji = UILabel()
     private let label = UILabel()
 
     override var annotation: MKAnnotation? { willSet { configure() } }
@@ -127,12 +128,11 @@ final class PlaneAnnotationView: MKAnnotationView {
         centerOffset = CGPoint(x: 0, y: -10)
         canShowCallout = true
 
-        let icon = UIImageView(image: UIImage(systemName: "airplane"))
-        icon.tintColor = .systemCyan
-        icon.contentMode = .scaleAspectFit
-        icon.frame = CGRect(x: 8, y: 10, width: 24, height: 24)
-        icon.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(icon)
+        planeEmoji.text = "✈️"
+        planeEmoji.font = .systemFont(ofSize: 26)
+        planeEmoji.frame = CGRect(x: 6, y: 8, width: 28, height: 28)
+        planeEmoji.textAlignment = .center
+        addSubview(planeEmoji)
 
         label.font = .systemFont(ofSize: 10, weight: .semibold)
         label.textColor = .white
@@ -149,8 +149,8 @@ final class PlaneAnnotationView: MKAnnotationView {
 
     private func configure() {
         guard let plane = annotation as? PlaneAnnotation else { return }
-        let angle = CGFloat(plane.aircraft.track) * .pi / 180
-        transform = CGAffineTransform(rotationAngle: angle)
+        // Rotate just the emoji so the airline label stays horizontal.
+        planeEmoji.transform = CGAffineTransform(rotationAngle: CGFloat(plane.aircraft.track) * .pi / 180)
         setAirlineLabel(visible: label.superview != nil, aircraft: plane.aircraft)
     }
 
@@ -195,7 +195,7 @@ final class LiveMapModel: ObservableObject {
                 guard !Task.isCancelled else { return }
                 self.aircraft = planes
                 self.lastError = planes.isEmpty
-                    ? "No traffic in this area right now — pan somewhere busier (FR24 live feed)."
+                    ? "No traffic in this area right now — try zooming out."
                     : nil
             } catch {
                 guard !Task.isCancelled else { return }
@@ -247,45 +247,35 @@ struct LiveMapView: View {
     let openPhotosFor: (String) -> Void
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                mapView
-                    .ignoresSafeArea(edges: .bottom)
+        ZStack {
+            mapView
+                .ignoresSafeArea(edges: .bottom)
 
-                VStack {
-                    glassSearchBar
-                    Spacer()
-                    glassStatus
-                }
-                .padding()
+            VStack {
+                glassSearchBar
+                Spacer()
+                glassStatus
             }
-            .navigationTitle("Live Map")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding()
         }
+        .toolbar(.hidden, for: .navigationBar) // no top title bar
         .onAppear {
             showAirlineLabels = settings.showAirlineLabels
             model.showAirlineLabels = settings.showAirlineLabels
             model.onSelectAircraft = { plane in
-                if let reg = plane.registration {
-                    openPhotosFor(reg)
-                } else {
-                    openPhotosFor(plane.id)
-                }
+                openPhotosFor(plane.flight ?? plane.id)
             }
             model.refresh()
         }
         .onDisappear {
             settings.showAirlineLabels = showAirlineLabels
         }
-        .onChange(of: settings.mapRefreshSeconds) { _, interval in
-            model.refresh()
-        }
         .onChange(of: settings.showAirlineLabels) { _, value in
             showAirlineLabels = value
         }
         .task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(max(5, settings.mapRefreshSeconds)))
+                try? await Task.sleep(for: .seconds(max(15, settings.mapRefreshSeconds)))
                 guard !model.isRefreshing else { continue }
                 model.refresh()
             }
