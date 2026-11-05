@@ -40,7 +40,8 @@ final class FR24LiveService {
         }
 
         // 2. FlightRadar24 zone feed
-        if let planes = try? await fetchFR24(latMin: latMin, latMax: latMax, lonMin: lonMin, lonMax: lonMax),
+        if let planes = try? await fetchFR24(latMin: latMin, latMax: latMax, lonMin: lonMin, lonMax: 
+lonMax),
            !planes.isEmpty {
             return planes
         }
@@ -96,7 +97,7 @@ final class FR24LiveService {
         return LiveAircraft(
             id: id,
             modeS: modeS,
-            registration: registration.isEmpty ? nil : registration,
+            registration: (registration?.isEmpty == false) ? registration : nil,
             flight: (flight?.isEmpty == false) ? flight : nil,
             latitude: lat,
             longitude: lon,
@@ -163,7 +164,7 @@ final class FR24LiveService {
         let modeS = strings.first(where: { $0.count == 6 && $0.allSatisfy({ $0.isHexDigit }) }) ?? (flight ?? "")
         let registration = strings.first(where: { $0 != flight && $0.count >= 3 && $0.count <= 12 && !$0.contains(" ") && $0 != modeS })
 
-        let id = flight ?? modeL
+        let id = flight ?? modeS
         guard !id.isEmpty else { return nil }
 
         return LiveAircraft(
@@ -217,7 +218,8 @@ final class FR24LiveService {
         guard let lon = num(5), let lat = num(6) else { return nil }
         let modeS = str(0) ?? "??????"
         let callsign = str(1)
-        let onGround = row.count > 8 ? ((row[8] as? NSNumber)?.boolValue ?? false) : false
+        let onGround = row.count > 8 ? ((row[8] as? NSNumber)?
+.boolValue ?? false) : false
         let baroAltM = num(7) ?? num(13)
         let velocity = num(9) ?? 0
         let track = num(10) ?? 0
