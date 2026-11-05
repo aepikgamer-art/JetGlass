@@ -1,0 +1,66 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          XCODE_APP=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build archive (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project JetGlass.xcodeproj \
+            -scheme JetGlass \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/JetGlass.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | xcpretty
+
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/JetGlass.xcarchive/Products/Applications/JetGlass.app" build/Payload/
+          cd build
+          zip -qry JetGlass.ipa Payload
+          ls -lh JetGlass.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JetGlass-ipa
+          path: build/JetGlass.ipa
+          retention-days: 30
+
+      - name: Upload xcarchive logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/**/*.xcactivitylog
+          if-no-files-found: ignore
+          retention-days: 7
