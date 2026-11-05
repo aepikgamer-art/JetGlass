@@ -102,7 +102,7 @@ struct FlightRecord: Codable, Identifiable, Hashable {
     }
 }
 
-// MARK: - Live traffic (FlightRadar24 zone feed)
+// MARK: - Live traffic
 
 struct LiveAircraft: Identifiable, Hashable {
     let id: String
@@ -115,6 +115,7 @@ struct LiveAircraft: Identifiable, Hashable {
     let altitudeFeet: Int
     let speedKnots: Int
     var airlineName: String?
+    var type: String?
 
     var coordinateDescription: String {
         String(format: "%.3f, %.3f", latitude, longitude)
@@ -139,30 +140,85 @@ struct Airport: Codable, Identifiable, Hashable {
     var id: String { icao }
 }
 
+
 // MARK: - Airline ICAO code lookup (common carriers)
 
 enum AirlineNames {
     static let map: [String: String] = [
-        "AAL": "American Airlines", "UAL": "United Airlines", "DAL": "Delta Air Lines",
-        "SWA": "Southwest Airlines", "ASA": "Alaska Airlines", "JBU": "JetBlue",
-        "NKS": "Spirit", "FFT": "Frontier", "HAL": "Hawaiian Airlines", "ACA": "Air Canada",
-        "WJA": "WestJet", "VOZ": "Volaris", "VIV": "Viva Aerobus", "AMX": "Aeroméxico",
-        "BAW": "British Airways", "VIR": "Virgin Atlantic", "EZY": "easyJet",
-        "RYR": "Ryanair", "DLH": "Lufthansa", "AFR": "Air France", "KLM": "KLM",
-        "IBE": "Iberia", "SWR": "SWISS", "AUA": "Austrian", "SAS": "SAS",
-        "FIN": "Finnair", "TAP": "TAP Air Portugal", "LOT": "LOT Polish",
-        "THY": "Turkish Airlines", "UAE": "Emirates", "ETD": "Etihad", "QTR": "Qatar Airways",
-        "SIA": "Singapore Airlines", "SIA1": "Singapore Airlines", "CPA": "Cathay Pacific",
-        "ANA": "ANA", "JAL": "Japan Airlines", "KAL": "Korean Air", "AAR": "Asiana",
-        "CCA": "Air China", "CES": "China Eastern", "CSN": "China Southern",
-        "QFA": "Qantas", "ANZ": "Air New Zealand", "ETH": "Ethiopian Airlines",
-        "MSR": "EgyptAir", "SAA": "South African", "RAM": "Royal Air Maroc",
-        "FDX": "FedEx", "UPS": "UPS", "GTI": "Atlas Air", "CLX": "Cargolux",
-        "AIC": "Air India", "SVA": "Saudia", "IRA": "Iran Air", "PGT": "Pegasus",
-        "AYT": "Ajet", "TVF": "Transavia", "SXS": "SunExpress", "EIN": "Aer Lingus",
-        "NAX": "Norwegian", "WZZ": "Wizz Air", "IBE2": "Iberia", "VLG": "Vueling",
-        "ONE": "Avianca", "LAN": "LATAM", "GLO": "GOL", "AZU": "Azul",
-        "ARG": "Aerolíneas Argentinas", "CMP": "Copa Airlines", "LPE": "LATAM Perú",
+        "AAL": "American Airlines",
+        "UAL": "United Airlines",
+        "DAL": "Delta Air Lines",
+        "SWA": "Southwest Airlines",
+        "ASA": "Alaska Airlines",
+        "JBU": "JetBlue",
+        "NKS": "Spirit",
+        "FFT": "Frontier",
+        "HAL": "Hawaiian Airlines",
+        "ACA": "Air Canada",
+        "WJA": "WestJet",
+        "VOZ": "Volaris",
+        "VIV": "Viva Aerobus",
+        "AMX": "Aeromexico",
+        "BAW": "British Airways",
+        "VIR": "Virgin Atlantic",
+        "EZY": "easyJet",
+        "RYR": "Ryanair",
+        "DLH": "Lufthansa",
+        "AFR": "Air France",
+        "KLM": "KLM",
+        "IBE": "Iberia",
+        "SWR": "SWISS",
+        "AUA": "Austrian",
+        "SAS": "SAS",
+        "FIN": "Finnair",
+        "TAP": "TAP Air Portugal",
+        "LOT": "LOT Polish",
+        "THY": "Turkish Airlines",
+        "UAE": "Emirates",
+        "ETD": "Etihad",
+        "QTR": "Qatar Airways",
+        "SIA": "Singapore Airlines",
+        "CPA": "Cathay Pacific",
+        "ANA": "ANA",
+        "JAL": "Japan Airlines",
+        "KAL": "Korean Air",
+        "AAR": "Asiana",
+        "CCA": "Air China",
+        "CES": "China Eastern",
+        "CSN": "China Southern",
+        "QFA": "Qantas",
+        "ANZ": "Air New Zealand",
+        "ETH": "Ethiopian Airlines",
+        "MSR": "EgyptAir",
+        "SAA": "South African",
+        "RAM": "Royal Air Maroc",
+        "FDX": "FedEx",
+        "UPS": "UPS",
+        "GTI": "Atlas Air",
+        "CLX": "Cargolux",
+        "AIC": "Air India",
+        "SVA": "Saudia",
+        "IRA": "Iran Air",
+        "PGT": "Pegasus",
+        "AYT": "Ajet",
+        "TVF": "Transavia",
+        "SXS": "SunExpress",
+        "EIN": "Aer Lingus",
+        "NAX": "Norwegian",
+        "WZZ": "Wizz Air",
+        "VLG": "Vueling",
+        "ONE": "Avianca",
+        "LAN": "LATAM",
+        "GLO": "GOL",
+        "AZU": "Azul",
+        "ARG": "Aerolineas Argentinas",
+        "CMP": "Copa Airlines",
+        "LPE": "LATAM Peru",
+        "RPA": "Republic",
+        "EDV": "Endeavor",
+        "SKW": "SkyWest",
+        "ENY": "Envoy",
+        "JZA": "Jazz",
     ]
 
     static func name(forFlight flight: String?) -> String? {

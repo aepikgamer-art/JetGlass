@@ -12,8 +12,6 @@ final class PlaneAnnotation: MKPointAnnotation {
         title = aircraft.flight ?? aircraft.registration ?? aircraft.id
     }
 
-    /// Moves an existing annotation to the aircraft's new position/heading
-    /// instead of tearing it down and adding a new one every refresh.
     func update(_ new: LiveAircraft) {
         aircraft = new
         coordinate = CLLocationCoordinate2D(latitude: new.latitude, longitude: new.longitude)
@@ -119,9 +117,6 @@ struct MapViewBridge: UIViewRepresentable {
     }
 }
 
-/// Plane annotation with a real SF Symbol airplane silhouette on a small glass
-/// badge, rotated to the aircraft's true heading, plus an airline label above
-/// that shrinks when the sky gets crowded.
 final class PlaneAnnotationView: MKAnnotationView {
     private let planeIcon = UIImageView()
     private let label = UILabel()
@@ -143,7 +138,6 @@ final class PlaneAnnotationView: MKAnnotationView {
         centerOffset = CGPoint(x: 0, y: -10)
         canShowCallout = true
 
-        // Real plane silhouette (SF Symbol) on a circular glass badge.
         let iconConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
         let planeSymbol = UIImage(systemName: "airplane", withConfiguration: iconConfig)?
             .withTintColor(.white, renderingMode: .alwaysOriginal)
@@ -174,7 +168,6 @@ final class PlaneAnnotationView: MKAnnotationView {
     }
 
     func setTrack(_ degrees: Double) {
-        // Rotate the plane icon with the aircraft's true heading.
         planeIcon.transform = CGAffineTransform(rotationAngle: CGFloat(degrees) * .pi / 180)
     }
 
@@ -185,7 +178,6 @@ final class PlaneAnnotationView: MKAnnotationView {
             return
         }
         if compact {
-            // Crowded sky: tiny text, callsign only.
             label.font = .systemFont(ofSize: 7, weight: .medium)
             label.text = " \(aircraft.flight ?? text) "
             label.frame = CGRect(x: -14, y: -12, width: 68, height: 12)
@@ -207,16 +199,74 @@ final class LiveMapModel: ObservableObject {
     @Published var lastError: String?
     @Published var compactLabels = false
     @Published var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 39.17, longitude: -96.5), // Sioux City / heartland default
+        center: CLLocationCoordinate2D(latitude: 39.17, longitude: -96.5),
         span: MKCoordinateSpan(latitudeDelta: 5, longitudeDelta: 5)
     )
     @Published var flyToAirport: Airport?
+    @Published var airlineFilter: String?
+    @Published var typeFilter: String?
 
     var showAirlineLabels = true
     var onSelectAircraft: (LiveAircraft) -> Void = { _ in }
 
     private let service = FR24LiveService()
     private var refreshTask: Task<Void, Never>?
+
+    var displayedAircraft: [LiveAircraft] {
+        aircraft.filter { plane in
+            let airlineOK: Bool
+            if let filter = airlineFilter {
+                airlineOK = filter == "Other"
+                    ? (plane.airlineName?.isEmpty != false)
+                    : plane.airlineName == filter
+            } else {
+                airlineOK = true
+            }
+            let typeOK: Bool
+            if let filter = typeFilter {
+                typeOK = filter == "Unknown"
+                    ? (plane.type?.isEmpty != false)
+                    : plane.type == filter
+            } else {
+                typeOK = true
+            }
+            return airlineOK && typeOK
+        }
+    }
+
+    var airlineOptions: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        var other = 0
+        for plane in aircraft {
+            if let name = plane.airlineName, !name.isEmpty {
+                counts[name, default: 0] += 1
+            } else {
+                other += 1
+            }
+        }
+        var options = counts.map { (name: $0.key, count: $0.value) }
+        options.sort { $0.count > $1.count }
+        if other > 0 { options.append((name: "Other", count: other)) }
+        return options
+    }
+
+    var typeOptions: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        var unknown = 0
+        for plane in aircraft {
+            if let type = plane.type, !type.isEmpty {
+                counts[type, default: 0] += 1
+            } else {
+                unknown += 1
+            }
+        }
+        var options = counts.map { (name: $0.key, count: $0.value) }
+        options.sort { $0.count > $1.count }
+        if unknown > 0 { options.append((name: "Unknown", count: unknown)) }
+        return options
+    }
+
+    var hasActiveFilter: Bool { airlineFilter != nil || typeFilter != nil }
 
     func refresh() {
         refreshTask?.cancel()
@@ -228,7 +278,7 @@ final class LiveMapModel: ObservableObject {
                 let planes = try await self.service.aircraft(in: currentRegion)
                 guard !Task.isCancelled else { return }
                 self.aircraft = planes
-                self.compactLabels = planes.count >= 20
+                self.compactLabels = self.displayedAircraft.count >= 20
                 self.lastError = planes.isEmpty
                     ? "No traffic in this area right now — try zooming out."
                     : nil
@@ -241,16 +291,17 @@ final class LiveMapModel: ObservableObject {
     }
 
     func syncAnnotations(onto map: MKMapView) {
+        let shown = displayedAircraft
         let currentPlanes = map.annotations.compactMap { $0 as? PlaneAnnotation }
         var byID: [String: PlaneAnnotation] = [:]
         for plane in currentPlanes { byID[plane.aircraft.id] = plane }
 
-        let newIDs = Set(aircraft.map(\.id))
+        let newIDs = Set(shown.map(\.id))
 
         for plane in currentPlanes where !newIDs.contains(plane.aircraft.id) {
             map.removeAnnotation(plane)
         }
-        for plane in aircraft {
+        for plane in shown {
             if let existing = byID[plane.id] {
                 existing.update(plane)
             } else {
@@ -285,6 +336,7 @@ struct LiveMapView: View {
     @State private var search = ""
     @State private var results: [Airport] = []
     @State private var showAirlineLabels: Bool = true
+    @State private var showFilters = false
 
     @State private var cardPlane: LiveAircraft?
     @State private var cardData: JetAPIResponse?
@@ -317,6 +369,10 @@ struct LiveMapView: View {
             .animation(.spring(duration: 0.3), value: cardPlane)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showFilters) {
+            filtersSheet
+                .presentationDetents([.medium, .large])
+        }
         .onAppear {
             showAirlineLabels = settings.showAirlineLabels
             model.showAirlineLabels = settings.showAirlineLabels
@@ -344,28 +400,26 @@ struct LiveMapView: View {
         MapViewBridge(model: model, showAirlineLabels: showAirlineLabels)
     }
 
-    // MARK: Plane info card
-
     private func showCard(for plane: LiveAircraft) {
         cardPlane = plane
         cardData = nil
         cardReg = plane.registration
-        cardType = nil
+        cardType = plane.type
         cardLoading = true
         cardExpanded = false
         let client = JetAPIClient(baseURLString: settings.apiBaseURL)
 
         Task {
-            // Resolve the registration from the mode S hex (adsbdb.com),
-            // then search jetapi by registration.
             var reg = plane.registration
             if reg == nil {
                 if let info = await AircraftRegistry.shared.info(for: plane.modeS) {
                     reg = info.registration
-                    cardType = [info.manufacturer, info.type]
-                        .compactMap { $0 }
-                        .filter { !$0.isEmpty }
-                        .joined(separator: " ")
+                    if cardType == nil {
+                        cardType = [info.manufacturer, info.type]
+                            .compactMap { $0 }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " ")
+                    }
                 }
             }
             guard cardPlane?.id == plane.id else { return }
@@ -396,11 +450,8 @@ struct LiveMapView: View {
         }
     }
 
-    /// FR24-style portrait card: big photo banner up top, details underneath.
-    /// Pull down (or tap More info) to reveal extra details.
     private func fullPlaneCard(_ plane: LiveAircraft, reg: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Big photo banner across the top of the card.
             ZStack(alignment: .topTrailing) {
                 cardBanner(height: 150, cornerRadius: 22)
                 closeButton
@@ -508,7 +559,6 @@ struct LiveMapView: View {
         )
     }
 
-    /// Extra details revealed when the card is pulled down.
     @ViewBuilder
     private func cardExpandedInfo(_ plane: LiveAircraft, reg: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -542,11 +592,14 @@ struct LiveMapView: View {
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 infoRow(label: "Mode S", value: plane.modeS.uppercased())
+                if let type = plane.type, !type.isEmpty {
+                    infoRow(label: "Type code", value: type)
+                }
                 if let serial = cardData?.jetPhotos?.images.first?.serial, !serial.isEmpty {
                     infoRow(label: "Serial", value: serial)
                 }
                 if let typeCode = cardData?.flightRadar?.typeCode, !typeCode.isEmpty {
-                    infoRow(label: "Type code", value: typeCode)
+                    infoRow(label: "FR24 type", value: typeCode)
                 }
                 if let operatorName = cardData?.flightRadar?.operatorName, !operatorName.isEmpty {
                     infoRow(label: "Operator", value: operatorName)
@@ -591,7 +644,6 @@ struct LiveMapView: View {
         .font(.caption)
     }
 
-    /// Landscape card — photo banner on the left, details on the right, one compact row.
     private func compactPlaneCard(_ plane: LiveAircraft, reg: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             cardBanner(width: 120, height: 90, cornerRadius: 18)
@@ -645,7 +697,6 @@ struct LiveMapView: View {
         .buttonStyle(.plain)
     }
 
-    /// Wide photo banner — fills the top of the card like FR24's detail panel.
     @ViewBuilder
     private func cardBanner(width: CGFloat? = nil, height: CGFloat, cornerRadius: CGFloat) -> some View {
         Group {
@@ -677,14 +728,12 @@ struct LiveMapView: View {
         .clipped()
     }
 
-    // MARK: Search + status
-
     private var glassSearchBar: some View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Search airport by ICAO (e.g. KCOS)", text: $search)
+                TextField("Search ICAO, IATA, city or name", text: $search)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                     .onChange(of: search) { _, value in
@@ -700,9 +749,9 @@ struct LiveMapView: View {
             }
             .padding(10)
 
-            if !results.isEmpty && search.count < 4 {
+            if !results.isEmpty {
                 VStack(spacing: 4) {
-                    ForEach(results) { airport in
+                    ForEach(results.prefix(6)) { airport in
                         Button { goTo(airport) } label: {
                             HStack {
                                 Text(airport.icao).bold()
@@ -727,13 +776,23 @@ struct LiveMapView: View {
     private var glassStatus: some View {
         HStack(spacing: 12) {
             Toggle(isOn: $showAirlineLabels) {
-                Label("Airlines above", systemImage: "tag")
+                Label("Airlines", systemImage: "tag")
                     .font(.subheadline)
             }
             .toggleStyle(.switch)
             .tint(.cyan)
 
             Spacer()
+
+            Button {
+                showFilters = true
+            } label: {
+                Image(systemName: model.hasActiveFilter
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+            }
+            .buttonStyle(.glass)
+            .tint(model.hasActiveFilter ? .cyan : .primary)
 
             if model.isRefreshing {
                 ProgressView()
@@ -746,7 +805,7 @@ struct LiveMapView: View {
                 .buttonStyle(.glass)
             }
 
-            Text("\(model.aircraft.count) aircraft")
+            Text("\(model.displayedAircraft.count) aircraft")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -761,6 +820,83 @@ struct LiveMapView: View {
                     .padding(.bottom, 58)
             }
         }
+    }
+
+    private var filtersSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Categories")
+                    .font(.headline)
+                Spacer()
+                Button("Clear") {
+                    model.airlineFilter = nil
+                    model.typeFilter = nil
+                }
+                .font(.subheadline)
+                .disabled(!model.hasActiveFilter)
+                Button("Done") { showFilters = false }
+                    .font(.subheadline.bold())
+            }
+
+            Text("Show only certain airlines or aircraft types on the map.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    if !model.airlineOptions.isEmpty {
+                        Text("Airlines")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                        ForEach(model.airlineOptions, id: \.name) { option in
+                            filterRow(title: option.name, count: option.count,
+                                      selected: model.airlineFilter == option.name) {
+                                model.airlineFilter = (model.airlineFilter == option.name) ? nil : option.name
+                            }
+                        }
+                    }
+
+                    if !model.typeOptions.isEmpty {
+                        Text("Aircraft types")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 8)
+                        ForEach(model.typeOptions, id: \.name) { option in
+                            filterRow(title: option.name, count: option.count,
+                                      selected: model.typeFilter == option.name) {
+                                model.typeFilter = (model.typeFilter == option.name) ? nil : option.name
+                            }
+                        }
+                    }
+
+                    if model.aircraft.isEmpty {
+                        Text("No traffic yet — pan the map somewhere busy first.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.bottom, 16)
+            }
+        }
+        .padding()
+    }
+
+    private func filterRow(title: String, count: Int, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .foregroundStyle(selected ? .cyan : .primary)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? .cyan : .secondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
     }
 
     private func goToFirstResult() {
