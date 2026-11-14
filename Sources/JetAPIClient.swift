@@ -36,12 +36,13 @@ final class JetAPIClient {
 
     /// Searches JetPhotos (and optionally FlightRadar24) for a registration or keyword query.
     func lookup(query: String, photos: Int, flights: Int, onlyJetPhotos: Bool = false) async throws -> JetAPIResponse {
-        let sanitized = query
+        let cleaned = query
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
-            .replacingOccurrences(of: " ", with: "-")
-        guard !sanitized.isEmpty,
-              sanitized.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else {
+            .map { $0.isWhitespace ? "-" : $0 }
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        let sanitized = String(cleaned)
+        guard !sanitized.isEmpty else {
             throw JetAPIError.badQuery
         }
 

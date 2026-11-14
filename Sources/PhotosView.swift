@@ -9,6 +9,7 @@ struct PhotosView: View {
     @State private var query = ""
     @State private var selectedPhoto: JetPhoto?
     @FocusState private var focused: Bool
+    @AppStorage("photoSource") private var photoSource = 0
 
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 10)]
 
@@ -17,6 +18,13 @@ struct PhotosView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     searchBar
+
+                    Picker("Photo source", selection: $photoSource) {
+                        Text("JetPhotos").tag(0)
+                        Text("Planespotters").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: photoSource) { _, _ in model.reset() }
 
                     if let error = model.error {
                         ContentUnavailableView("No luck", systemImage: "questionmark.bubble",
@@ -138,7 +146,7 @@ struct PhotosView: View {
 
     private func runSearch() {
         focused = false
-        Task { await model.search(query: query, settings: settings) }
+        Task { await model.search(query: query, settings: settings, source: photoSource) }
     }
 }
 
@@ -151,12 +159,25 @@ final class PhotosModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
 
-    func search(query: String, settings: AppSettings) async {
+    func search(query: String, settings: AppSettings, source: Int = 0) async {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         isLoading = true
         error = nil
         photos = []
         flightRadar = nil
+
+        if source == 1 {
+            do {
+                photos = try await PlanespottersClient().photos(reg: query)
+                if photos.isEmpty {
+                    error = "Nothing found on Planespotters for that registration."
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
+            isLoading = false
+            return
+        }
 
         let client = JetAPIClient(baseURLString: settings.apiBaseURL)
         do {
