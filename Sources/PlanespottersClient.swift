@@ -65,9 +65,10 @@ final class PlanespottersClient {
             return []
         }
         let (data, response) = try await session.data(from: url)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            if let http, http.statusCode == 404 { return [] }
-            throw JetAPIError.http(http?.statusCode ?? 0)
+        let http = response as? HTTPURLResponse
+        if let http, !(200...299).contains(http.statusCode) {
+            if http.statusCode == 404 { return [] }
+            throw JetAPIError.http(http.statusCode)
         }
         let decoded = try JSONDecoder().decode(PlanespottersResponse.self, from: data)
         return decoded.photos.map { p in
