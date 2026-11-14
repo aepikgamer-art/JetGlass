@@ -10,9 +10,9 @@
       "subtitle": "Liquid Glass plane spotter",
       "localizedDescription": "JetPhotos + FlightRadar24 in a liquid-glass iOS 26 app. Live map with airline labels and ICAO airport search, photo search and downloads via jetapi.dev.",
       "tintColor": "#32ADE6",
-      "version": "2.08",
-      "versionDate": "2026-11-14T12:00:00Z",
-      "versionDescription": "Photo search queries are now cleaned up automatically (extra spaces, lowercase and newlines all work), and you can pick Planespotters.net as a second photo source with a JetPhotos / Planespotters toggle on the Photos tab.",
+      "version": "2.09",
+      "versionDate": "2026-11-14T13:30:00Z",
+      "versionDescription": "Planespotters search improvements: Mode-S hex codes now work too, empty results and unknown registrations show a clean message instead of an error, and the app explains that Planespotters only supports exact registration lookups.",
       "downloadURL": "https://github.com/aepikgamer-art/JetGlass/releases/latest/download/JetGlass.ipa"
     }
   ]

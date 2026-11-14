@@ -170,7 +170,7 @@ final class PhotosModel: ObservableObject {
             do {
                 photos = try await PlanespottersClient().photos(reg: query)
                 if photos.isEmpty {
-                    error = "Nothing found on Planespotters for that registration."
+                    error = "No Planespotters photos for that query. This source only searches exact registrations (like N142UW) and Mode-S hex codes - use JetPhotos for type or airline searches."
                 }
             } catch {
                 self.error = error.localizedDescription

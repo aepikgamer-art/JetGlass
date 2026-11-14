@@ -8,8 +8,8 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "2.08"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "2.09"
+    CURRENT_PROJECT_VERSION: "9"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGN_IDENTITY: ""
     CODE_SIGNING_REQUIRED: "NO"
@@ -28,8 +28,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: JetGlass
-        CFBundleShortVersionString: "2.08"
-        CFBundleVersion: "8"
+        CFBundleShortVersionString: "2.09"
+        CFBundleVersion: "9"
         UILaunchScreen:
           UIColorName: ""
         ITSAppUsesNonExemptEncryption: false
