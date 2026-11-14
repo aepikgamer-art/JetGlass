@@ -140,8 +140,7 @@ final class PlanespottersClient {
     func resolveAirline(_ query: String) async -> AdsbdbAirline? {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard let url = URL(string: "https://api.adsbdb.com/v0/airline/" + term) else { return nil }
-        let (data, _) = try? await session.data(from: url)
-        guard let data else { return nil }
+        guard let (data, _) = try? await session.data(from: url) else { return nil }
         return (try? JSONDecoder().decode(AdsbdbAirlineResponse.self, from: data))?.response?.first
     }
 
