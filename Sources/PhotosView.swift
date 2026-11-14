@@ -54,6 +54,10 @@ struct PhotosView: View {
                 PhotoDetailView(photo: photo, flightRadar: model.flightRadar)
                     .presentationDetents([.large])
             }
+            .sheet(item: $model.fallback) { target in
+                SafariView(url: target.url)
+                    .ignoresSafeArea()
+            }
             .onChange(of: searchBus.pendingQuery) { _, newValue in
                 if let newValue, !newValue.isEmpty {
                     query = newValue
@@ -158,6 +162,7 @@ final class PhotosModel: ObservableObject {
     @Published var flightRadar: FlightRadarResult?
     @Published var isLoading = false
     @Published var error: String?
+    @Published var fallback: SearchFallback?
 
     func search(query: String, settings: AppSettings, source: Int = 0) async {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
@@ -168,9 +173,25 @@ final class PhotosModel: ObservableObject {
 
         if source == 1 {
             do {
-                photos = try await PlanespottersClient().photos(reg: query)
+                let client = PlanespottersClient()
+                let term = query.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let kind = PlanespottersClient.classify(term)
+                var results: [JetPhoto] = []
+                if kind == "airline" {
+                    if let airline = await client.resolveAirline(term) {
+                        results = try await client.photosForAirline(icao: airline.icao)
+                    }
+                } else if kind == "type" {
+                    results = try await client.photosForType(term)
+                } else {
+                    results = try await client.photos(reg: query)
+                }
+                photos = results
                 if photos.isEmpty {
-                    error = "No Planespotters photos for that query. This source only searches exact registrations (like N142UW) and Mode-S hex codes - use JetPhotos for type or airline searches."
+                    error = "No Planespotters photos found. Try an exact registration (N142UW), a type (A350) or an airline code (UAL)."
+                    if let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                        fallback = SearchFallback(url: URL(string: "https://www.planespotters.net/search?q=" + encoded) ?? URL(string: "https://www.planespotters.net")!)
+                    }
                 }
             } catch {
                 self.error = error.localizedDescription
@@ -201,6 +222,7 @@ final class PhotosModel: ObservableObject {
         photos = []
         flightRadar = nil
         error = nil
+        fallback = nil
     }
 }
 
@@ -342,4 +364,23 @@ struct PhotoDetailView: View {
             saving = false
         }
     }
+}
+
+// MARK: - In-app Safari fallback
+
+struct SearchFallback: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+import SafariServices
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
